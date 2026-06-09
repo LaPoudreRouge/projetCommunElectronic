@@ -6,3 +6,4 @@ if not exist ".venv\Scripts\python.exe" (
 
 echo Starting audio capture...
 .venv\Scripts\python.exe receive.py %*
+if errorlevel 1 pause
