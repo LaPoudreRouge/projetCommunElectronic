@@ -1,9 +1,7 @@
-// micSend.ino — Tiva C LaunchPad microphone streaming (half-second chunks)
+// micSend.ino — Tiva C LaunchPad microphone streaming (plain text)
 // MAX4466 -> ADC @ 10 kHz -> 5000-sample buffer -> serial -> PC
 // Auto-streams after 2s boot delay. No handshake needed.
-// Frame format: raw 12-bit ADC, no marker bit
-//   byte1 = (val >> 4) & 0xFF    // high 8 bits
-//   byte2 = (val & 0x0F) << 4    // low 4 bits in upper nibble
+// Output: one decimal integer per line (0-4095), 5000 lines per chunk.
 
 #define MIC_PIN A0
 #define BAUD 500000
@@ -34,24 +32,11 @@ void loop() {
     }
   }
 
-  // --- When half-second buffer is full, send it ---
+  // --- When buffer is full, print all values as text ---
   if (count >= CHUNK_SAMPLES) {
-    // Print buffer as space-separated hex for serial monitor debugging
     for (uint16_t i = 0; i < CHUNK_SAMPLES; i++) {
-      if (i > 0) Serial.print(' ');
-      Serial.print(buf[i], HEX);
+      Serial.println(buf[i]);
     }
-    Serial.println();
-
-    // Send binary chunk to Python (no marker bit, raw 12-bit)
-    uint8_t tx[CHUNK_SAMPLES * 2];
-    for (uint16_t i = 0; i < CHUNK_SAMPLES; i++) {
-      uint16_t val = buf[i];
-      tx[i * 2]     = (val >> 4) & 0xFF;   // high 8 bits
-      tx[i * 2 + 1] = (val & 0x0F) << 4;   // low 4 bits in upper nibble
-    }
-    Serial.write(tx, CHUNK_SAMPLES * 2);
-
     count = 0;
   }
 }

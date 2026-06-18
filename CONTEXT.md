@@ -15,10 +15,9 @@
 
 - **Sample rate**: 10 kHz (voice-grade, 5 kHz Nyquist).
 - **Communication**: Serial over USB (virtual COM port via ICDI).
-- **Serial format**: Raw binary, 2 bytes per sample, no marker bit.
-  - `byte1 = (adc_val >> 4) & 0xFF` — high 8 bits of 12-bit ADC
-  - `byte2 = (adc_val & 0x0F) << 4` — low 4 bits in upper nibble
-- **Chunk size**: 5000 samples per chunk (half second), sent as one `Serial.write()`.
+- **Serial format**: Plain text. Each sample is one line: a decimal integer 0–4095 followed by CR+LF.
+- **Chunk size**: 5000 samples buffered then printed all at once. No binary.
 - **Firmware**: Auto-streams after `delay(2000)` in `setup()`. No handshake.
-- **PC file format**: 16-bit mono WAV saved every 5 seconds (10 chunks) to timestamped files in a folder.
+- **PC file format**: 16-bit mono WAV saved every 50000 samples (5 seconds of audio) to timestamped files in a folder.
 - **Baud rate**: 500000.
+- **Effective throughput**: ~4500 Hz wall-clock due to text overhead (500000 baud ~120µs per line). Samples themselves are at 10 kHz.
