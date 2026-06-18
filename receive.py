@@ -17,8 +17,11 @@ import struct
 import sys
 import time
 from datetime import datetime
+from dotenv import load_dotenv
 import requests
 import serial
+
+load_dotenv()
 
 BAUD = 921600
 SAMPLE_RATE = 20000
