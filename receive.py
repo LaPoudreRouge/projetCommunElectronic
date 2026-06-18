@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 import serial
 
-BAUD = 500000
+BAUD = 2000000
 SAMPLE_RATE = 10000
 WAV_CHANNELS = 1
 WAV_BITS = 16

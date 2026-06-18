@@ -4,7 +4,7 @@
 // Output: one decimal integer per line (0-4095), 5000 lines per chunk.
 
 #define MIC_PIN A0
-#define BAUD 500000
+#define BAUD 2000000
 #define SAMPLE_INTERVAL 100        // 100 us = 10 kHz
 #define CHUNK_SAMPLES 5000         // half second @ 10 kHz
 

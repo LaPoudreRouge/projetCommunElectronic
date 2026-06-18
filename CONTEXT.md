@@ -19,5 +19,5 @@
 - **Chunk size**: 5000 samples buffered then printed all at once. No binary.
 - **Firmware**: Auto-streams after `delay(2000)` in `setup()`. No handshake.
 - **PC file format**: 16-bit mono WAV saved every 50000 samples (5 seconds of audio) to timestamped files in a folder.
-- **Baud rate**: 500000.
+- **Baud rate**: 2000000 (2 Mbps).
 - **Effective throughput**: ~4500 Hz wall-clock due to text overhead (500000 baud ~120µs per line). Samples themselves are at 10 kHz.
