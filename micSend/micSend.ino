@@ -4,7 +4,7 @@
 // Output: raw uint16_t values, 10000 bytes per chunk.
 
 #define MIC_PIN A0
-#define BAUD 2000000
+#define BAUD 921600
 #define SAMPLE_INTERVAL 100        // 100 us = 10 kHz
 #define CHUNK_SAMPLES 5000         // half second @ 10 kHz
 

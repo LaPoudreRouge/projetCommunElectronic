@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 import serial
 
-BAUD = 2000000
+BAUD = 921600
 SAMPLE_RATE = 10000
 WAV_CHANNELS = 1
 WAV_BITS = 16
@@ -67,8 +67,9 @@ def main():
     print("  (saves WAV every 5 seconds of audio — Ctrl+C to stop)")
 
     buf_samples = []        # samples for current 5-second block
-    sample_count = 0        # samples in current block
+    sample_count = 0        # chunks in current block
     total_samples = 0
+    bad_samples = 0          # out-of-range values (corruption)
     start = time.time()
     last_report = start
 
@@ -82,6 +83,9 @@ def main():
             # Unpack 5000 uint16_t samples
             for i in range(0, CHUNK_BYTES, 2):
                 val = struct.unpack('<H', raw[i:i+2])[0]   # 0-4095
+                if val > 4095:
+                    bad_samples += 1
+                    val = 4095
                 buf_samples.append((val << 4) - 32768)     # to signed 16-bit WAV
                 total_samples += 1
 
@@ -101,7 +105,7 @@ def main():
             if now - last_report >= 1.0:
                 elapsed = now - start
                 rate = total_samples / elapsed if elapsed else 0
-                print(f"  {total_samples} samples @ {rate:.0f} Hz")
+                print(f"  {total_samples} samples @ {rate:.0f} Hz, {bad_samples} bad")
                 last_report = now
 
     except KeyboardInterrupt:

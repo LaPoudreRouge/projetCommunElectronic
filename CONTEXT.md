@@ -17,4 +17,4 @@
 - **Communication**: Serial over USB (virtual COM port via ICDI).
 - **Serial format**: Raw binary. `Serial.write()` sends the buffer as little-endian uint16_t values (10000 bytes per half-second chunk).
 - **PC file format**: 16-bit mono WAV saved every 50000 samples (5 seconds of audio) to timestamped files in a folder.
-- **Baud rate**: 2000000 (2 Mbps).
+- **Baud rate**: 921600.
