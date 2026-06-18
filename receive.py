@@ -67,9 +67,9 @@ def main():
 
     buf_samples = []            # samples for current 5-second block
     total_samples = 0
+    next_save_at = SAVE_INTERVAL   # save when total_samples reaches this
     leftover = b''              # incomplete byte from previous read
     start = time.time()
-    last_save = start
 
     try:
         while True:
@@ -92,7 +92,7 @@ def main():
                 leftover = raw[i:]
 
             # Check if it's time to save WAV
-            if total_samples >= SAVE_INTERVAL:
+            if total_samples >= next_save_at:
                 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                 fname = os.path.join(out_dir, f"{ts}.wav")
                 write_wav(fname, buf_samples, SAMPLE_RATE)
@@ -100,7 +100,7 @@ def main():
                 rate = total_samples / elapsed if elapsed else 0
                 print(f"  Saved {fname} ({len(buf_samples)} samples @ {rate:.0f} Hz)")
                 buf_samples = []
-                last_save = time.time()
+                next_save_at += SAVE_INTERVAL
 
             # Status every STATUS_INTERVAL samples
             if total_samples % STATUS_INTERVAL < 2:
