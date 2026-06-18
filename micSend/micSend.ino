@@ -35,8 +35,10 @@ void loop() {
   // --- When buffer is full, print all values as text ---
   if (count >= CHUNK_SAMPLES) {
     for (uint16_t i = 0; i < CHUNK_SAMPLES; i++) {
-      Serial.println(buf[i]);
+      if (i > 0) Serial.print(',');
+      Serial.print(buf[i]);
     }
+    Serial.println();
     count = 0;
   }
 }

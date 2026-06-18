@@ -1,7 +1,7 @@
 """
 receive.py — Capture audio from Tiva C LaunchPad over serial.
 
-Tiva sends ADC values as plain text (decimal ints, one per line).
+Tiva sends ADC values as comma-separated decimal ints, one line per chunk.
 Python reads lines, converts to signed 16-bit, saves WAV every 5 seconds.
 
 Usage:
@@ -77,16 +77,15 @@ def main():
             if not line:
                 continue
 
-            # Parse decimal ADC value
-            try:
-                val = int(line.strip())
-            except ValueError:
-                continue  # skip any non-numeric garbage
-
-            # Convert to signed 16-bit for WAV
-            buf_samples.append((val << 4) - 32768)
-            sample_count += 1
-            total_samples += 1
+            # Parse comma-separated ADC values
+            for token in line.strip().split(','):
+                try:
+                    val = int(token)
+                except ValueError:
+                    continue
+                buf_samples.append((val << 4) - 32768)
+                sample_count += 1
+                total_samples += 1
 
             # Check if this finishes a 5000-sample chunk
             if sample_count >= CHUNK_SAMPLES * SAVE_INTERVAL:
