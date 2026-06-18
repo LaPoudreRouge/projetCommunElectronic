@@ -1,61 +1,57 @@
-// micSend.ino — Tiva C LaunchPad microphone streaming
-// MAX4466 → ADC @ 10 kHz → 2-byte frames → serial → PC
-// Uses only Energia built-in API (analogRead, micros, Serial).
-// Protocol: 0x80 | (sample>>8) as byte1, sample & 0xFF as byte2
-// Handshake: PC sends 0xAA, Tiva replies 0xBB
+// micSend.ino — Tiva C LaunchPad microphone streaming (half-second chunks)
+// MAX4466 -> ADC @ 10 kHz -> 5000-sample buffer -> serial -> PC
+// Auto-streams after 2s boot delay. No handshake needed.
+// Frame format: raw 12-bit ADC, no marker bit
+//   byte1 = (val >> 4) & 0xFF    // high 8 bits
+//   byte2 = (val & 0x0F) << 4    // low 4 bits in upper nibble
 
 #define MIC_PIN A0
-#define BAUD 460800
-#define SAMPLE_INTERVAL 100       // 100 µs = 10 kHz
-#define BUF_SIZE 256              // sample ring buffer
-#define TX_CHUNK 32               // samples per serial flush
+#define BAUD 500000
+#define SAMPLE_INTERVAL 100        // 100 us = 10 kHz
+#define CHUNK_SAMPLES 5000         // half second @ 10 kHz
 
-uint16_t buf[BUF_SIZE];
-uint16_t head = 0;
+uint16_t buf[CHUNK_SAMPLES];
 uint16_t count = 0;
 bool streaming = false;
 unsigned long lastSample = 0;
 
 void setup() {
   Serial.begin(BAUD);
+  delay(2000);
+  lastSample = micros();
+  streaming = true;
 }
 
 void loop() {
-  // --- Handshake ---
-  if (Serial.available() > 0) {
-    uint8_t c = Serial.read();
-    if (c == 0xAA && !streaming) {
-      head = 0; count = 0;
-      lastSample = micros();
-      streaming = true;
-      Serial.write(0xBB);
-    } else if (c == 0xCC) {
-      streaming = false;
-    }
-  }
   if (!streaming) return;
 
   // --- Sample ADC at precise 10 kHz intervals ---
   unsigned long now = micros();
   while (now - lastSample >= SAMPLE_INTERVAL) {
     lastSample += SAMPLE_INTERVAL;
-    if (count < BUF_SIZE) {
-      buf[(head + count) % BUF_SIZE] = analogRead(MIC_PIN);
-      count++;
+    if (count < CHUNK_SAMPLES) {
+      buf[count++] = analogRead(MIC_PIN);
     }
   }
 
-  // --- Flush buffer to serial in chunks ---
-  if (count >= TX_CHUNK) {
-    uint16_t todo = (count < TX_CHUNK) ? count : TX_CHUNK;
-    uint8_t out[TX_CHUNK * 2];
-    for (uint16_t i = 0; i < todo; i++) {
-      uint16_t s = buf[head];
-      head = (head + 1) % BUF_SIZE;
-      out[i * 2]     = 0x80 | ((s >> 8) & 0x0F);
-      out[i * 2 + 1] = s & 0xFF;
+  // --- When half-second buffer is full, send it ---
+  if (count >= CHUNK_SAMPLES) {
+    // Print buffer as space-separated hex for serial monitor debugging
+    for (uint16_t i = 0; i < CHUNK_SAMPLES; i++) {
+      if (i > 0) Serial.print(' ');
+      Serial.print(buf[i], HEX);
     }
-    Serial.write(out, todo * 2);
-    count -= todo;
+    Serial.println();
+
+    // Send binary chunk to Python (no marker bit, raw 12-bit)
+    uint8_t tx[CHUNK_SAMPLES * 2];
+    for (uint16_t i = 0; i < CHUNK_SAMPLES; i++) {
+      uint16_t val = buf[i];
+      tx[i * 2]     = (val >> 4) & 0xFF;   // high 8 bits
+      tx[i * 2 + 1] = (val & 0x0F) << 4;   // low 4 bits in upper nibble
+    }
+    Serial.write(tx, CHUNK_SAMPLES * 2);
+
+    count = 0;
   }
 }

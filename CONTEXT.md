@@ -15,9 +15,10 @@
 
 - **Sample rate**: 10 kHz (voice-grade, 5 kHz Nyquist).
 - **Communication**: Serial over USB (virtual COM port via ICDI).
-- **Serial format**: Raw binary, 2 bytes per sample (12-bit value in 16-bit frame).
-- **Sync**: High bit of first byte acts as marker bit for per-frame sync.
-- **PC file format**: 16-bit WAV (12-bit values left-aligned in 16-bit slots).
-- **Port detection**: Scan all COM ports, send handshake, listen for Tiva reply.
-- **Sampling method**: Timer-triggered at 10 kHz, ADC read in ISR, buffer flushed by main loop.
-- **Baud rate**: 460800 (USB virtual serial handles the speed; this gives headroom).
+- **Serial format**: Raw binary, 2 bytes per sample, no marker bit.
+  - `byte1 = (adc_val >> 4) & 0xFF` — high 8 bits of 12-bit ADC
+  - `byte2 = (adc_val & 0x0F) << 4` — low 4 bits in upper nibble
+- **Chunk size**: 5000 samples per chunk (half second), sent as one `Serial.write()`.
+- **Firmware**: Auto-streams after `delay(2000)` in `setup()`. No handshake.
+- **PC file format**: 16-bit mono WAV saved every 5 seconds (10 chunks) to timestamped files in a folder.
+- **Baud rate**: 500000.

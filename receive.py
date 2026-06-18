@@ -1,154 +1,123 @@
 """
 receive.py — Capture audio from Tiva C LaunchPad over serial.
 
-Usage:
-    python receive.py                  # auto-detect Tiva port
-    python receive.py --port COM3      # specify port manually
-    python receive.py --output test.wav
+Tiva runs auto-stream firmware (micSend.ino) — no handshake needed.
+Sends raw 12-bit ADC values in half-second chunks (no marker bit).
+Python saves a WAV file every 5 seconds to recordings/ folder.
 
-Press Ctrl+C to stop recording and write the WAV file.
+Usage:
+    python receive.py --port COM5
+    python receive.py --port COM5 --output myrec
+
+Press Ctrl+C to stop — last partial chunk is discarded.
 """
 
 import argparse
+import os
 import struct
 import sys
 import time
+from datetime import datetime
 import serial
-import serial.tools.list_ports
 
-HANDSHAKE_SEND = b'\xAA'
-HANDSHAKE_REPLY = b'\xBB'
-BAUD = 460800
+BAUD = 500000
 SAMPLE_RATE = 10000
 WAV_CHANNELS = 1
 WAV_BITS = 16
 
-
-def find_tiva_port() -> str | None:
-    """Scan all COM ports, send handshake, return the port that replies."""
-    ports = list(serial.tools.list_ports.comports())
-    print(f"Scanning {len(ports)} port(s)...")
-
-    for port in ports:
-        try:
-            ser = serial.Serial(
-                port.device, BAUD, timeout=0.5, write_timeout=0.5
-            )
-            time.sleep(0.2)  # let the DTR reset settle
-            ser.write(HANDSHAKE_SEND)
-            reply = ser.read(1)
-            ser.close()
-            if reply == HANDSHAKE_REPLY:
-                print(f"  -> Tiva found on {port.device}")
-                return port.device
-            else:
-                print(f"  {port.device}: no handshake")
-        except (serial.SerialException, OSError):
-            print(f"  {port.device}: can't open")
-            continue
-
-    return None
+CHUNK_SAMPLES = 5000          # half second @ 10 kHz
+CHUNK_BYTES = CHUNK_SAMPLES * 2
+SAVE_INTERVAL = 10            # save WAV every 10 chunks (5 seconds)
 
 
-def write_wav(filename: str, samples: list[int], sample_rate: int):
-    """Write a WAV file from signed 16-bit samples."""
-    num_samples = len(samples)
-    data_size = num_samples * WAV_CHANNELS * (WAV_BITS // 8)
-    fmt_size = 16
-    audio_format = 1  # PCM
-
-    with open(filename, 'wb') as f:
-        # RIFF header
+def write_wav(filepath, samples, sample_rate):
+    """Write a 16-bit mono WAV file."""
+    n = len(samples)
+    ds = n * 2
+    with open(filepath, 'wb') as f:
         f.write(b'RIFF')
-        f.write(struct.pack('<I', 36 + data_size))
+        f.write(struct.pack('<I', 36 + ds))
         f.write(b'WAVE')
-
-        # fmt chunk
         f.write(b'fmt ')
-        f.write(struct.pack('<I', fmt_size))
-        f.write(struct.pack('<H', audio_format))
-        f.write(struct.pack('<H', WAV_CHANNELS))
+        f.write(struct.pack('<I', 16))
+        f.write(struct.pack('<HH', 1, 1))
         f.write(struct.pack('<I', sample_rate))
-        f.write(struct.pack('<I', sample_rate * WAV_CHANNELS * (WAV_BITS // 8)))
-        f.write(struct.pack('<H', WAV_CHANNELS * (WAV_BITS // 8)))
-        f.write(struct.pack('<H', WAV_BITS))
-
-        # data chunk
+        f.write(struct.pack('<I', sample_rate * 2))
+        f.write(struct.pack('<HH', 2, 16))
         f.write(b'data')
-        f.write(struct.pack('<I', data_size))
+        f.write(struct.pack('<I', ds))
         for s in samples:
             f.write(struct.pack('<h', s))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Capture audio from Tiva C LaunchPad")
-    parser.add_argument('--port', '-p', help="Serial port (e.g. COM3)")
-    parser.add_argument('--output', '-o', default='output.wav', help="Output WAV file")
-    parser.add_argument('--list', '-l', action='store_true', help="List ports and exit")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', '-p', required=True)
+    parser.add_argument('--output', '-o', default='output')
     args = parser.parse_args()
 
-    if args.list:
-        for p in serial.tools.list_ports.comports():
-            print(f"{p.device} — {p.description}")
-        return
+    # Create recordings folder
+    out_dir = args.output
+    os.makedirs(out_dir, exist_ok=True)
 
-    # Find the Tiva
-    port = args.port or find_tiva_port()
-    if not port:
-        print("ERROR: Tiva not found. Specify port with --port or check connection.")
-        sys.exit(1)
-
-    # Open and handshake
-    ser = serial.Serial(port, BAUD, timeout=1, write_timeout=1)
-    time.sleep(0.2)
+    # Open port — DTR=True (default) resets Tiva, then it boots and auto-streams
+    print(f"Opening {args.port} ...")
+    ser = serial.Serial(args.port, BAUD, timeout=1.0, write_timeout=1)
+    time.sleep(3.0)  # wait for Tiva boot + delay(2000)
     ser.reset_input_buffer()
-    ser.write(HANDSHAKE_SEND)
-    reply = ser.read(1)
 
-    if reply != HANDSHAKE_REPLY:
-        print(f"ERROR: Handshake failed on {port} (got {reply.hex() if reply else 'nothing'})")
-        ser.close()
-        sys.exit(1)
+    print(f"Recording at {SAMPLE_RATE} Hz, saving to {out_dir}/")
+    print("  (saves WAV every 5 seconds — Ctrl+C to stop)")
 
-    print(f"Connected to {port}, recording at {SAMPLE_RATE} Hz…")
-    print("Press Ctrl+C to stop.")
-
-    samples: list[int] = []
-    dropped = 0
+    buf_samples = []          # accumulates samples for current 5-second block
+    chunk_count = 0           # chunks received in current block
+    total_chunks = 0          # total chunks received
+    wav_index = 0             # WAV file number
     start = time.time()
+    last_report = start
 
     try:
         while True:
-            raw = ser.read(2)
-            if len(raw) < 2:
-                continue
+            # Read one half-second chunk (10000 bytes)
+            raw = ser.read(CHUNK_BYTES)
+            if len(raw) < CHUNK_BYTES:
+                continue  # incomplete chunk, retry
 
-            b0, b1 = raw[0], raw[1]
+            # Parse 5000 samples from the chunk
+            for i in range(0, CHUNK_BYTES, 2):
+                val = (raw[i] << 4) | (raw[i + 1] >> 4)  # 12-bit ADC 0-4095
+                buf_samples.append((val << 4) - 32768)    # to signed 16-bit WAV
 
-            # Validate marker bit
-            if not (b0 & 0x80):
-                dropped += 1
-                continue
+            chunk_count += 1
+            total_chunks += 1
 
-            # Extract 12-bit sample
-            sample = ((b0 & 0x0F) << 8) | b1
-            # Convert to signed 16-bit for WAV
-            wav_sample = (sample << 4) - 32768
-            samples.append(wav_sample)
+            # Check if it's time to save a WAV
+            if chunk_count >= SAVE_INTERVAL:
+                wav_index += 1
+                ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                fname = os.path.join(out_dir, f"{ts}.wav")
+                write_wav(fname, buf_samples, SAMPLE_RATE)
+                print(f"  Saved {fname} ({len(buf_samples)} samples)")
+                buf_samples = []
+                chunk_count = 0
+
+            # Status report every second
+            now = time.time()
+            if now - last_report >= 1.0:
+                elapsed = now - start
+                total_samples = total_chunks * CHUNK_SAMPLES
+                rate = total_samples / elapsed if elapsed else 0
+                print(f"  {total_samples} samples @ {rate:.0f} Hz")
+                last_report = now
 
     except KeyboardInterrupt:
-        duration = time.time() - start
-        ser.write(b'\xCC')  # tell Tiva to stop
+        t = time.time() - start
         ser.close()
-
-        actual_rate = len(samples) / duration if duration > 0 else 0
-
-        print(f"\nCaptured {len(samples)} samples in {duration:.1f}s ({actual_rate:.0f} Hz avg)")
-        if dropped:
-            print(f"Sync errors (dropped frames): {dropped}")
-
-        write_wav(args.output, samples, SAMPLE_RATE)
-        print(f"Written to {args.output} ({len(samples)} samples, {SAMPLE_RATE} Hz, {WAV_BITS}-bit)")
+        total_samples = total_chunks * CHUNK_SAMPLES
+        rate = total_samples / t if t else 0
+        print(f"\n{total_samples} samples in {t:.1f}s ({rate:.0f} Hz)")
+        print(f"WAV files saved in {out_dir}/")
+        # Discard partial chunk (buf_samples is incomplete block)
 
 
 if __name__ == '__main__':
