@@ -1,8 +1,8 @@
 """
 receive.py — Capture audio from Tiva C LaunchPad over serial.
 
-Tiva sends ADC values as comma-separated decimal ints, one line per chunk.
-Python reads lines, converts to signed 16-bit, saves WAV every 5 seconds.
+Tiva sends raw uint16_t values — 10000 bytes per half-second chunk.
+Python reads chunks, unpacks to signed 16-bit, saves WAV every 5 seconds.
 
 Usage:
     python receive.py --port COM5
@@ -25,6 +25,7 @@ WAV_CHANNELS = 1
 WAV_BITS = 16
 
 CHUNK_SAMPLES = 5000           # samples per half-second buffer
+CHUNK_BYTES = CHUNK_SAMPLES * 2  # 10000 bytes per chunk
 SAVE_INTERVAL = 10             # save WAV every 10 chunks (50000 samples = 5s)
 
 
@@ -73,22 +74,21 @@ def main():
 
     try:
         while True:
-            line = ser.readline()
-            if not line:
+            # Read one half-second chunk (10000 raw bytes)
+            raw = ser.read(CHUNK_BYTES)
+            if len(raw) < CHUNK_BYTES:
                 continue
 
-            # Parse comma-separated ADC values
-            for token in line.strip().split(','):
-                try:
-                    val = int(token)
-                except ValueError:
-                    continue
-                buf_samples.append((val << 4) - 32768)
-                sample_count += 1
+            # Unpack 5000 uint16_t samples
+            for i in range(0, CHUNK_BYTES, 2):
+                val = struct.unpack('<H', raw[i:i+2])[0]   # 0-4095
+                buf_samples.append((val << 4) - 32768)     # to signed 16-bit WAV
                 total_samples += 1
 
-            # Check if this finishes a 5000-sample chunk
-            if sample_count >= CHUNK_SAMPLES * SAVE_INTERVAL:
+            sample_count += 1
+
+            # Check if this finishes a 10-chunk block (50000 samples = 5s)
+            if sample_count >= SAVE_INTERVAL:
                 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                 fname = os.path.join(out_dir, f"{ts}.wav")
                 write_wav(fname, buf_samples, SAMPLE_RATE)

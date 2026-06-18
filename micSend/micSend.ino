@@ -1,7 +1,7 @@
-// micSend.ino — Tiva C LaunchPad microphone streaming (plain text)
+// micSend.ino — Tiva C LaunchPad microphone streaming (raw binary)
 // MAX4466 -> ADC @ 10 kHz -> 5000-sample buffer -> serial -> PC
 // Auto-streams after 2s boot delay. No handshake needed.
-// Output: one decimal integer per line (0-4095), 5000 lines per chunk.
+// Output: raw uint16_t values, 10000 bytes per chunk.
 
 #define MIC_PIN A0
 #define BAUD 2000000
@@ -32,13 +32,9 @@ void loop() {
     }
   }
 
-  // --- When buffer is full, print all values as text ---
+  // --- When buffer is full, send raw binary ---
   if (count >= CHUNK_SAMPLES) {
-    for (uint16_t i = 0; i < CHUNK_SAMPLES; i++) {
-      if (i > 0) Serial.print(',');
-      Serial.print(buf[i]);
-    }
-    Serial.println();
+    Serial.write((uint8_t*)buf, CHUNK_SAMPLES * 2);
     count = 0;
   }
 }
