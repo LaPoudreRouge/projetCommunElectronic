@@ -17,6 +17,7 @@ import struct
 import sys
 import time
 from datetime import datetime
+import requests
 import serial
 
 BAUD = 921600
@@ -26,6 +27,9 @@ WAV_BITS = 16
 
 STATUS_INTERVAL = 20000        # print status every 20000 samples (1s @ 20 kHz)
 SAVE_INTERVAL = 100000         # save WAV every 100000 samples (5s @ 20 kHz)
+
+UPLOAD_URL = "http://10.243.187.65:3000/api/audio/upload"
+ROVER_API_KEY = os.environ.get("ROVER_API_KEY", "rvr-G7E-a9f2c4d81b3e7056kX2mNpQw")
 
 
 def write_wav(filepath, samples, sample_rate):
@@ -48,10 +52,33 @@ def write_wav(filepath, samples, sample_rate):
             f.write(struct.pack('<h', s))
 
 
+def upload_to_db(filepath, duration_sec):
+    """Upload a WAV file to the ROVER API. Returns True on success."""
+    try:
+        with open(filepath, "rb") as f:
+            r = requests.post(
+                UPLOAD_URL,
+                headers={"X-API-Key": ROVER_API_KEY},
+                files={"file": f},
+                data={"duration": duration_sec},
+                timeout=10
+            )
+        if r.ok:
+            print(f"  Uploaded to DB ({os.path.getsize(filepath)} bytes)")
+            return True
+        else:
+            print(f"  Upload failed: HTTP {r.status_code}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"  Upload error: {e}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', '-p', required=True)
     parser.add_argument('--output', '-o', default='output')
+    parser.add_argument('--db', action='store_true', help='Upload WAVs to DB instead of saving locally')
     args = parser.parse_args()
 
     out_dir = args.output
@@ -62,7 +89,8 @@ def main():
     time.sleep(3.0)
     ser.reset_input_buffer()
 
-    print(f"Recording at {SAMPLE_RATE} Hz, saving to {out_dir}/")
+    mode = "uploading to DB" if args.db else f"saving to {out_dir}/"
+    print(f"Recording at {SAMPLE_RATE} Hz, {mode}")
     print("  (status every 1s — Ctrl+C to stop)")
 
     buf_samples = []            # samples for current 5-second block
@@ -94,11 +122,25 @@ def main():
             # Check if it's time to save WAV
             if total_samples >= next_save_at:
                 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-                fname = os.path.join(out_dir, f"{ts}.wav")
-                write_wav(fname, buf_samples, SAMPLE_RATE)
                 elapsed = time.time() - start
                 rate = total_samples / elapsed if elapsed else 0
-                print(f"  Saved {fname} ({len(buf_samples)} samples @ {rate:.0f} Hz)")
+                count = len(buf_samples)
+
+                if args.db:
+                    # Write to temp file, upload, delete
+                    tmp = os.path.join(out_dir, f"{ts}.wav")
+                    write_wav(tmp, buf_samples, SAMPLE_RATE)
+                    if upload_to_db(tmp, 5):
+                        print(f"  {count} samples @ {rate:.0f} Hz — uploaded")
+                    else:
+                        print(f"  {count} samples @ {rate:.0f} Hz — upload failed, kept {tmp}")
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                else:
+                    fname = os.path.join(out_dir, f"{ts}.wav")
+                    write_wav(fname, buf_samples, SAMPLE_RATE)
+                    print(f"  Saved {fname} ({count} samples @ {rate:.0f} Hz)")
+
                 buf_samples = []
                 next_save_at += SAVE_INTERVAL
 
