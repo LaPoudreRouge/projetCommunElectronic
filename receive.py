@@ -28,8 +28,8 @@ WAV_BITS = 16
 STATUS_INTERVAL = 20000        # print status every 20000 samples (1s @ 20 kHz)
 SAVE_INTERVAL = 100000         # save WAV every 100000 samples (5s @ 20 kHz)
 
-UPLOAD_URL = "http://10.243.187.65:3000/api/audio/upload"
 ROVER_API_KEY = os.environ.get("ROVER_API_KEY", "rvr-G7E-a9f2c4d81b3e7056kX2mNpQw")
+UPLOAD_URL = os.environ.get("UPLOAD_URL", "http://10.243.187.65:3000/api/audio/upload")
 
 
 def write_wav(filepath, samples, sample_rate):
