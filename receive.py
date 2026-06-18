@@ -127,15 +127,14 @@ def main():
                 count = len(buf_samples)
 
                 if args.db:
-                    # Write to temp file, upload, delete
+                    # Write to temp file, upload, delete on success only
                     tmp = os.path.join(out_dir, f"{ts}.wav")
                     write_wav(tmp, buf_samples, SAMPLE_RATE)
                     if upload_to_db(tmp, 5):
                         print(f"  {count} samples @ {rate:.0f} Hz — uploaded")
-                    else:
-                        print(f"  {count} samples @ {rate:.0f} Hz — upload failed, kept {tmp}")
-                    if os.path.exists(tmp):
                         os.remove(tmp)
+                    else:
+                        print(f"  {count} samples @ {rate:.0f} Hz — upload failed, saved {tmp}")
                 else:
                     fname = os.path.join(out_dir, f"{ts}.wav")
                     write_wav(fname, buf_samples, SAMPLE_RATE)
