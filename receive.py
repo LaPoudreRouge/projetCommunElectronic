@@ -1,14 +1,14 @@
 """
 receive.py — Capture audio from Tiva C LaunchPad over serial.
 
-Tiva sends raw uint16_t values — 10000 bytes per half-second chunk.
-Python reads chunks, unpacks to signed 16-bit, saves WAV every 5 seconds.
+Tiva streams raw uint16_t values continuously at 20 kHz.
+Python reads all bytes, unpacks samples, prints status every second.
 
 Usage:
     python receive.py --port COM5
     python receive.py --port COM5 --output myrec
 
-Press Ctrl+C to stop — last partial chunk is discarded.
+Press Ctrl+C to stop — last partial block is discarded.
 """
 
 import argparse
@@ -20,13 +20,12 @@ from datetime import datetime
 import serial
 
 BAUD = 921600
-SAMPLE_RATE = 10000
+SAMPLE_RATE = 20000
 WAV_CHANNELS = 1
 WAV_BITS = 16
 
-CHUNK_SAMPLES = 5000           # samples per half-second buffer
-CHUNK_BYTES = CHUNK_SAMPLES * 2  # 10000 bytes per chunk
-SAVE_INTERVAL = 10             # save WAV every 10 chunks (50000 samples = 5s)
+STATUS_INTERVAL = 20000        # print status every 20000 samples (1s @ 20 kHz)
+SAVE_INTERVAL = 100000         # save WAV every 100000 samples (5s @ 20 kHz)
 
 
 def write_wav(filepath, samples, sample_rate):
@@ -59,62 +58,62 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     print(f"Opening {args.port} ...")
-    ser = serial.Serial(args.port, BAUD, timeout=1.0, write_timeout=1)
-    time.sleep(3.0)  # wait for Tiva boot + delay(2000)
+    ser = serial.Serial(args.port, BAUD, timeout=0.1, write_timeout=1)
+    time.sleep(3.0)
     ser.reset_input_buffer()
 
     print(f"Recording at {SAMPLE_RATE} Hz, saving to {out_dir}/")
-    print("  (saves WAV every 5 seconds of audio — Ctrl+C to stop)")
+    print("  (status every 1s — Ctrl+C to stop)")
 
-    buf_samples = []        # samples for current 5-second block
-    sample_count = 0        # chunks in current block
+    buf_samples = []            # samples for current 5-second block
     total_samples = 0
-    bad_samples = 0          # out-of-range values (corruption)
+    leftover = b''              # incomplete byte from previous read
     start = time.time()
-    last_report = start
+    last_save = start
 
     try:
         while True:
-            # Read one half-second chunk (10000 raw bytes)
-            raw = ser.read(CHUNK_BYTES)
-            if len(raw) < CHUNK_BYTES:
-                continue
+            raw = leftover + ser.read(4096)
+            leftover = b''
 
-            # Unpack 5000 uint16_t samples
-            for i in range(0, CHUNK_BYTES, 2):
-                val = struct.unpack('<H', raw[i:i+2])[0]   # 0-4095
+            # Process complete uint16_t pairs
+            n = len(raw)
+            i = 0
+            while i <= n - 2:
+                val = struct.unpack('<H', raw[i:i+2])[0]
                 if val > 4095:
-                    bad_samples += 1
                     val = 4095
-                buf_samples.append((val << 4) - 32768)     # to signed 16-bit WAV
+                buf_samples.append((val << 4) - 32768)
                 total_samples += 1
+                i += 2
 
-            sample_count += 1
+            # Keep one leftover byte if odd-length
+            if i < n:
+                leftover = raw[i:]
 
-            # Check if this finishes a 10-chunk block (50000 samples = 5s)
-            if sample_count >= SAVE_INTERVAL:
+            # Check if it's time to save WAV
+            if total_samples >= SAVE_INTERVAL:
                 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                 fname = os.path.join(out_dir, f"{ts}.wav")
                 write_wav(fname, buf_samples, SAMPLE_RATE)
-                print(f"  Saved {fname} ({len(buf_samples)} samples)")
-                buf_samples = []
-                sample_count = 0
-
-            # Status every second
-            now = time.time()
-            if now - last_report >= 1.0:
-                elapsed = now - start
+                elapsed = time.time() - start
                 rate = total_samples / elapsed if elapsed else 0
-                print(f"  {total_samples} samples @ {rate:.0f} Hz, {bad_samples} bad")
-                last_report = now
+                print(f"  Saved {fname} ({len(buf_samples)} samples @ {rate:.0f} Hz)")
+                buf_samples = []
+                last_save = time.time()
+
+            # Status every STATUS_INTERVAL samples
+            if total_samples % STATUS_INTERVAL < 2:
+                elapsed = time.time() - start
+                rate = total_samples / elapsed if elapsed else 0
+                print(f"  {total_samples} samples @ {rate:.0f} Hz")
 
     except KeyboardInterrupt:
         t = time.time() - start
         ser.close()
         rate = total_samples / t if t else 0
         print(f"\n{total_samples} samples in {t:.1f}s ({rate:.0f} Hz)")
-        print(f"WAV files saved in {out_dir}/")
-        # Partial chunk discarded
+        # Partial block discarded
 
 
 if __name__ == '__main__':
