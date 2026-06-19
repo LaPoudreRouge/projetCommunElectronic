@@ -32,7 +32,7 @@ STATUS_INTERVAL = 20000        # print status every 20000 samples (1s @ 20 kHz)
 SAVE_INTERVAL = 100000         # save WAV every 100000 samples (5s @ 20 kHz)
 
 ROVER_API_KEY = os.environ.get("ROVER_API_KEY", "rvr-G7E-a9f2c4d81b3e7056kX2mNpQw")
-UPLOAD_URL = os.environ.get("UPLOAD_URL", "http://10.243.187.65:3000/api/audio/upload")
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://10.243.187.65:3000")
 
 
 def write_wav(filepath, samples, sample_rate):
@@ -56,22 +56,34 @@ def write_wav(filepath, samples, sample_rate):
 
 
 def upload_to_db(filepath, duration_sec):
-    """Upload a WAV file to the ROVER API. Returns True on success."""
+    """Two-step presigned upload to MinIO via ROVER API. Returns True on success."""
+    filename = os.path.basename(filepath)
+    file_size = os.path.getsize(filepath)
+
     try:
+        # Step 1: request a presigned upload URL
+        r = requests.post(
+            f"{API_BASE_URL}/api/audio/presign-upload",
+            headers={"X-API-Key": ROVER_API_KEY},
+            json={"filename": filename, "fileSize": file_size, "duration": duration_sec},
+            timeout=10
+        )
+        if not r.ok:
+            print(f"  Presign failed: HTTP {r.status_code} {r.text[:200]}")
+            return False
+        data = r.json()
+        upload_url = data["uploadUrl"]
+
+        # Step 2: PUT file directly to MinIO
         with open(filepath, "rb") as f:
-            r = requests.post(
-                UPLOAD_URL,
-                headers={"X-API-Key": ROVER_API_KEY},
-                files={"file": f},
-                data={"duration": duration_sec},
-                timeout=10
-            )
+            r = requests.put(upload_url, data=f, headers={"Content-Type": "audio/wav"}, timeout=30)
         if r.ok:
-            print(f"  Uploaded to DB ({os.path.getsize(filepath)} bytes)")
+            print(f"  Uploaded {filename} ({file_size} bytes)")
             return True
         else:
-            print(f"  Upload failed: HTTP {r.status_code}")
+            print(f"  MinIO PUT failed: HTTP {r.status_code}")
             return False
+
     except requests.exceptions.RequestException as e:
         print(f"  Upload error: {e}")
         return False
